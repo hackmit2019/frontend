@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <meta charset="utf-8" />
+
+<!-- begin styles and scripts, which should really go in their own folder -->
+<style type="text/css">
+html, body {
+	padding: 0;
+	margin: 0;
+	font-family: 'roboto';
+}
+</style>
+<!--
+<link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+<script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+-->
+<link href="material-components-web.min.css" rel="stylesheet">
+<script src="material-components-web.min.js"></script>
+<link rel="stylesheet" href="icon.css">
+<script src="jquery.min.js"></script>
+<script type='text/javascript'>
+let map;
+let heatmap;
+let currentDisasterId = -1;
+function updateData(newDisasters) {
+	{
+		let dcards = $("#disasters").children();
+		for(let j = 0; j < dcards.length; j++) {
+			let found = false;
+			for(let i = 0; i < newDisasters.length; i++) {
+				if($(dcards[j]).data('id') == newDisasters[i]["id"]) {
+					found = true;
+				}
+			}
+			if(!found) {
+				$(dcards[j]).animate({
+					opacity: 0,
+					height: 0
+				}, function() {
+					$(dcards[j]).remove();
+				});
+				if(currentDisasterId == $(dcards[j]["id"])) {
+					goBack();
+				}
+			}
+		}
+	}
+	for(let i = 0; i < newDisasters.length; i++) {
+		let dcards = $("#disasters").children();
+		let dfound = false;
+		for(let j = 0; j < dcards.length; j++) {
+			if($(dcards[j]).data('id') == newDisasters[i]["id"]) {
+				$(dcards[j]).data('calls', JSON.stringify(newDisasters[i]["calls"]));
+				$(dcards[j]).children("h2").text(newDisasters[i]["name"]);
+				let curTime = +(new Date());
+				let diff = curTime - newDisasters[i]["when"];
+				let minutes = Math.round(diff/1000/60);
+				$($(dcards[j]).children(".demo-card__subtitle")[0]).text("Last seen " + minutes + " minute" + (minutes == 1 ? "" : "s") + " ago.");
+				dfound = true;
+			}
+		}
+		if(!dfound) {
+			let ndisaster = constructDisaster(newDisasters[i]["name"], newDisasters[i]["id"], newDisasters[i]["when"], newDisasters[i]["lat"], newDisasters[i]["long"], newDisasters[i]["calls"]);
+			$(ndisaster).css('opacity', 0);
+			$("#disasters")[0].prepend(ndisaster);
+			$(ndisaster).animate({
+				opacity: 1
+			});
+		}
+		if(newDisasters[i]["id"] == currentDisasterId) {
+			{
+				let cds = $("#calls").children();
+				for(let k = 0; k < cds.length; k++) {
+					let cid2 = $(cds[k]).data("id");
+					let found = false;
+					for(let j = 0; j < newDisasters[i]["calls"].length; j++) {
+						let call = newDisasters[i]["calls"][j];
+						let cid = call["id"];
+						if(cid == cid2) {
+							found = true;
+							break;
+						}
+					}
+					if(!found) {
+						$(cds[k]).animate({
+							opacity: 0,
+							height: 0,
+						}, function() {
+							$(cds[k]).remove();
+						});
+					}
+				}
+			}
+			for(let j = 0; j < newDisasters[i]["calls"].length; j++) {
+				let call = newDisasters[i]["calls"][j];
+				let cid = call["id"];
+				let cds = $("#calls").children();
+				let found = false;
+				for(let k = 0; k < cds.length; k++) {
+					let cid2 = $(cds[k]).data("id");
+					if(cid == cid2) {
+						found = true;
+						break;
+					}
+				}
+				if(!found) {
+					{
+						let div = constructVoicemail(call["text"], call["id"], call["file"], call["type"], call["latitude"], call["longitude"]); 
+						let audio = div.getElementsByTagName("audio")[0];
+						audio.onloadedmetadata = function() {
+						let duration = audio.duration;
+						let seconds = Math.round(duration % 60);
+						let minutes = Math.floor(duration / 60);
+						let sstr = "" + seconds;
+						console.log(sstr);
+						while(sstr.length < 2) {
+						sstr = "0" + sstr;
+						}
+						let str = minutes + ":" + sstr;
+						div.getElementsByClassName("duration")[0].innerText = str;
+						};
+						let playbutton = div.getElementsByClassName("playbutton")[0];
+						let iel = playbutton.getElementsByTagName("i")[0];
+						playbutton.onclick = function() {
+						if(iel.innerText.trim() == "play_arrow") {
+						if(audio.duration == audio.currentTime) {
+						audio.currentTime = 0;
+						}
+						audio.play();
+						iel.innerText = "pause";
+						} else {
+						audio.pause();
+						iel.innerText = "play_arrow";
+						}
+						};
+						audio.onended = function() {
+						iel.innerText = "play_arrow";
+						};
+						$(div).css("opacity", "0");
+						$("#calls")[0].prepend(div);
+						$(div).animate({
+							opacity: 1,
+						});
+					}
+				}
+			}
+		}
+	}
+}
+function updateHeatmap(nlocs) {
+	map.layers.remove(heatmap);
+	var locs = Microsoft.Maps.TestDataGenerator.getLocations(nlocs.length, map.getBounds());
+	for(let i = 0; i < nlocs.length; i++) {
+		locs[i]["latitude"] = nlocs[i]["latitude"];
+		locs[i]["longitude"] = nlocs[i]["longitude"];
+	}
+	    heatmap = new Microsoft.Maps.HeatMapLayer(locs, {
+		intensity: 0.65,
+		radius: 1000,
+		unit: 'meters', 
+	    });
+	    map.layers.insert(heatmap);
+}
+function getMap() {
+	map = new Microsoft.Maps.Map('#myMap', {
+	    credentials: 'Al_diG1piCJhnMUuuy9YNSeEktSFD4dYEdU62HyFl2c7eWDCfsZa_iZ0R93F64zn',
+	    mapTypeId: Microsoft.Maps.MapTypeId.road,
+	    center: new Microsoft.Maps.Location(39.5, -98.4),
+	    zoom: 4
+	});
+	//Generate a 50,000 random locations that are within the bounds of the map view.
+	var locs = Microsoft.Maps.TestDataGenerator.getLocations(29, map.getBounds());
+	
+	var nlocs = [{latitude:33.50114377314564,longitude:-86.71925999860125,transcript:'Ohno!Myhousehasflooded.'},{latitude:33.491664232056905,longitude:-86.75055750804358,transcript:'Ohno,atelephonepolehasfallendown.'},{latitude:33.50484422329545,longitude:-86.73134371802487,transcript:'Ohno,myneighbor\'shousehasflooded!'},{latitude:33.502401623300955,longitude:-86.74019588761487,transcript:'Thereiswaterfillingthestreets!'},{latitude:33.48906770816802,longitude:-86.7351050604719,transcript:'Itisrainingtoohardandwon\'tstop.Thewaterlevelhasalreadyreachedintothehousesofmyneighbor.'},{latitude:33.50710895282411,longitude:-86.73463088996373,transcript:'There\'stoomuchrain,anditiscausingflooding.'},{latitude:33.50315576922555,longitude:-86.73950826499367,transcript:'Isawatelephonepollfalldownrecently.'},{latitude:33.49329618144623,longitude:-86.74291189862011,transcript:'Idon\'tknowwheremydogis.Iseemtohavelosthim.'},{latitude:33.49680399222002,longitude:-86.74233052980952,transcript:'Help,mybabydrownedintheflooding.'},{latitude:33.50626300488672,longitude:-86.7328870602998,transcript:'Help,mydog\'sbabyhasdrownedintheflood.'},{latitude:33.47649605640306,longitude:-86.9259891810069,transcript:'Thereisatigerlooseinthecity.'},{latitude:33.48713645074087,longitude:-86.91977108972658,transcript:'Thereisawildanimalwhohasexitedthezooandishungryforbabies.'},{latitude:33.46789750203265,longitude:-86.91464990927305,transcript:'I\'mworriedmybabywillbeeatenbythetiger.'},{latitude:33.47225533292567,longitude:-86.9135837471818,transcript:'IletatigerloosebecauseIdon\'tlikemyneighbor\'sbaby.'},{latitude:33.59875239829361,longitude:-86.7749924506816,transcript:'Ijustwitnessedacarcrash,andIsuspectthepeopleinvolvedaredrugdealers.'},{latitude:33.62730891047514,longitude:-86.7698709169728,transcript:'Mydealerjustcrashedintothisasshole,andthemethIjustboughtisnowgone.'},{latitude:33.60663691513103,longitude:-86.79115029179064,transcript:'There\'sacarcrashon35andlamar.'},{latitude:33.5932663366462,longitude:-86.76025549668006,transcript:'Help,Ijustgotintoanaccidentwithadrugdealeron35andlamar.'},{latitude:33.5997678698451,longitude:-86.77015370017492,transcript:'Isawatelephonepollfalldown.I\'mworriedsomeonemaybehurt.'},{latitude:33.59170145755444,longitude:-86.76908929999549,transcript:'Therewasaprettyseverepileupon35andlamar.'},{latitude:33.65415458872488,longitude:-86.6183115979507,transcript:'Thehurricanehasbeguntohitthecity,andIhaven\'tevacuatedyet.'},{latitude:33.648246952362086,longitude:-86.62664435736039,transcript:'Help!MybabyisstuckunderneaththefloorboardsandIcan\'tgobackintothehousebecauseofthehurricane.'},{latitude:33.65462700928248,longitude:-86.59805894802611,transcript:'Iamtryingtosmokebutthestrongwindsofthehurricanekeepblowingoutmyjoint.'},{latitude:33.65392134616909,longitude:-86.61627939000837,transcript:'Thereisaverybigstormwithlotsofrainandstrongwinds.IamafraidofbeinghurledaroundlikeDorothyandtheAluminumman.'},{latitude:33.64063736928513,longitude:-86.62729355439022,transcript:'IthoughtthehurricanewouldnothitasfarinlandasBirmingham,butIwaswrong!IamcurrentlyaloftduetothestrongwindsandIfearImaynotmakeitbackdown.'},{latitude:33.64136172205298,longitude:-86.62329776406014,transcript:'Thereisstrongwindsandamassivedownpour.Ifearflooding.Pleasesendhelpto26thandSpeedway.'},{latitude:33.65480970826691,longitude:-86.60805997109213,transcript:'Pleaseevacuatethecity,becausethereisastorminboundthatwillprobablydestroythecity.'},{latitude:33.63980004888656,longitude:-86.62458312056182,transcript:'There\'sahurricane!Whyhasthecitynotevacuatedmeyet?Iamblownaway,andabouttobeforreal!'},{latitude:33.64941827886348,longitude:-86.6135875927881,transcript:'Ihavemadepeacewithmyimpendingdeath,butothersmaynothave.Pleasealertthepublicofthishurricane.'}];
+	for(let i = 0; i < nlocs.length; i++) {
+		locs[i]["latitude"] = nlocs[i]["latitude"];
+		locs[i]["longitude"] = nlocs[i]["longitude"];
+	}
+
+	//Load the HeatMap module.
+	Microsoft.Maps.loadModule('Microsoft.Maps.HeatMap', function () {
+	    heatmap = new Microsoft.Maps.HeatMapLayer(locs, {
+		intensity: 0.65,
+		radius: 1000,
+		unit: 'meters', 
+	    });
+	    map.layers.insert(heatmap);
+	});
+}
+function updateSizes() {
+	let width = $(window).width();
+	let sidebarWidth = 400;
+	let mapWidth = width-sidebarWidth;
+	let height = $(window).height();
+	$("#myMap").width(mapWidth);
+	$("#myMap").height(height);
+	$("#sidebar").width(sidebarWidth);
+	$("#sidebar").height(height);
+}
+/*let voicemails = [
+	{"text": "Help! My dog has started to eat my other dog. This angered the second dog, who tried to eat the original one. Now both of my dogs have eaten the other, and I'm worried that the total matter in the universe has decreased.", "file": "https://api.twilio.com/2010-04-01/Accounts/ACdefb5cf78a4117f4acb67125ca72c36f/Recordings/RE54dd534feb504d4398335209c3249d9d", "type": "audio/wav"},
+	{"text": "Oh no! There is an event horizon forming on 21st street. It is blocking my commute to work at the train station. On the bright side, it is bending light in such a way that I can see into my neighbor's garage. That bastard stole my lawnmower.", "file": "", "type": ""},
+];*/
+function viewCalls(voicemails) {
+	$("#disasters").animate({
+		left: "-400px",
+		opacity: "0",
+	});
+	$("#calls").html("");
+	for(let i = 0; i < voicemails.length; i++) {
+		let div = constructVoicemail(voicemails[i]["text"], voicemails[i]["id"], voicemails[i]["file"], voicemails[i]["type"], voicemails[i]["latitude"], voicemails[i]["longitude"]); 
+		let audio = div.getElementsByTagName("audio")[0];
+		audio.onloadedmetadata = function() {
+			let duration = audio.duration;
+			let seconds = Math.round(duration % 60);
+			let minutes = Math.floor(duration / 60);
+			let sstr = "" + seconds;
+			console.log(sstr);
+			while(sstr.length < 2) {
+				sstr = "0" + sstr;
+			}
+			let str = minutes + ":" + sstr;
+			div.getElementsByClassName("duration")[0].innerText = str;
+		};
+		let playbutton = div.getElementsByClassName("playbutton")[0];
+		let iel = playbutton.getElementsByTagName("i")[0];
+		playbutton.onclick = function() {
+			if(iel.innerText.trim() == "play_arrow") {
+				if(audio.duration == audio.currentTime) {
+					audio.currentTime = 0;
+				}
+				audio.play();
+				iel.innerText = "pause";
+			} else {
+				audio.pause();
+				iel.innerText = "play_arrow";
+			}
+		};
+		audio.onended = function() {
+			iel.innerText = "play_arrow";
+		};
+		$("#calls")[0].appendChild(div);
+	}
+	$("#calls").css('left', '400px');
+	$("#calls").show();
+	$("#calls").css('opacity', '0');
+	$("#calls").animate({
+		left: '0',
+		opacity: "1"
+	}, function() {
+		const {MDCSlider} = mdc.slider;
+		let cards = document.getElementsByClassName("mdc-card");
+		for(let i = 0; i < cards.length; i++) {
+			const sliders = cards[i].getElementsByClassName("mdc-slider");
+			let audio = cards[i].getElementsByTagName("audio")[0];
+			if(sliders.length <= 0) continue;
+			const sliderEl = sliders[0];
+			console.log(cards[i].getElementsByTagName("audio"));
+			const slider = new MDCSlider(sliderEl);
+			slider.listen('MDCSlider:change', function() {
+				audio.currentTime = slider.value / 100 * audio.duration;
+			});
+			audio.ontimeupdate = function() {
+				slider.value = 100 * (audio.currentTime / audio.duration);
+			};
+		}
+	});
+	state = 'calls';
+	animateForward("Calls");
+}
+function animateBack(pagename) {
+	currentDisasterId = -1;
+	$("#header_current").animate({
+		left: '130px',
+		opacity: "0",
+	});
+	$("#backarrow").animate({
+		opacity: "0",
+		left: "-270px",
+	});
+	$("#header_new").text(pagename);
+	$("#header_new").css('left', '-270px');
+	$("#header_new").animate({
+		left: '-70px',
+		opacity: 1,
+	}, function(done) {
+		$("#header_current").text(pagename);
+		$("#header_current").css('left', '-70px');
+		$("#header_current").css('opacity', '1');
+		$("#header_new").css('opacity', '0');
+	});
+}
+function animateForward(pagename) {
+	$("#header_current").animate({
+		left: '-200',
+		opacity: 0,
+	});
+	$("#backarrow").animate({
+		opacity: "1",
+		left: "0px",
+	});
+	$("#header_new").text(pagename);
+	$("#header_new").css('left', '200px');
+	$("#header_new").animate({
+		left: '0',
+		opacity: 1,
+	}, function(done) {
+		$("#header_current").text(pagename);
+		$("#header_current").css('left', '0px');
+		$("#header_current").css('opacity', '1');
+		$("#header_new").css('opacity', '0');
+	});
+}
+let nextID = 0;
+function generateID() {
+	let str = "generated_id_" + nextID;
+	nextID++;
+	return str;
+}
+let state = 'disasters';
+function goBack() {
+	if(state == 'disasters') {
+		//alert("Oh no! Can't go back.");
+	} else if(state == "calls") {
+		animateBack("Disasters");
+		$("#calls").animate({
+			left: "400px",
+			opacity: "0",
+		});
+		$("#disasters").css('left', '-400px');
+		$("#disasters").show();
+		$("#disasters").css('opacity', '0');
+		$("#disasters").animate({
+			left: '0',
+			opacity: "1"
+		});
+		state = 'disasters';
+	} else {
+		alert("Unknown state");
+	}
+}
+function constructDisaster(name, idx, lastseen, lat, long, calls) {
+	/*
+		<div class="mdc-card mdc-card-outlined demo-card demo-ui-control" style="margin: 10px; box-shadow: 0px 2px 1px -1px rgba(0, 0, 0, 0.2), 0px 2px 5px 0px rgba(0, 0, 0, 0.14), 0px 1px 3px 0px rgba(0,0,0,.12)">
+			<div class="mdc-card__primary-action demo-card__primary-action" onclick="viewCalls();" tabindex="0">
+				<div class="demo-card__primary" style="padding-left: 20px; padding-right: 20px;">
+					<h2 class="demo-card__title mdc-typography mdc-typography--headline6">Fire</h2>
+					<h3 class="demo-card__subtitle mdc-typography mdc-typography--subtitle2">Last reported 3 minutes ago</h3>
+				</div>
+			</div>
+			<div class="mdc-card__actions">
+				<div class="mdc-card__action-buttons">
+					<button class="mdc-button mdc-card__action mdc-card__action--button" onclick="viewCalls();">Details</button>
+					<button class="mdc-button mdc-card__action mdc-card__action--button">Remove</button>
+				</div>
+				<div class="mdc-card__action-icons">
+					<button class="mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded" title="View on map" data-mdc-ripple-is-unbounded="true">explore</button>
+					<button class="mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded" title="Share" data-mdc-ripple-is-unbounded="true" onclick="window.open('https://twitter.com/intent/tweet?text=Check%20out%20this%20cool%20disaster%20I%20found%20at%2042.3601%C2%B0%20N%2C%2071.0589%C2%B0%20W%21%20%F0%9F%94%A5%F0%9F%92%80%F0%9F%A4%A2%E2%99%BF%F0%9F%98%82');">share</button>
+				</div>
+			</div>
+		</div>
+	*/
+	let cardDiv = document.createElement("div");
+	$(cardDiv).data("id", idx);
+	$(cardDiv).data('calls', JSON.stringify(calls));
+	let id = generateID();
+	cardDiv.setAttribute("id", id);
+	cardDiv.setAttribute("class", "mdc-card mdc-card-outlined demo-card demo-ui-control");
+	cardDiv.setAttribute("style", "margin: 10px; box-shadow: 0px 2px 1px -1px rgba(0, 0, 0, 0.2), 0px 2px 5px 0px rgba(0, 0, 0, 0.14), 0px 1px 3px 0px rgba(0,0,0,.12)");
+
+	let primaryDiv = document.createElement("div");
+	primaryDiv.setAttribute("class", "mdc-card__primary-action demo-card__primary-action");
+	primaryDiv.onclick = function() {
+		currentDisasterId = idx;
+		let dcards = $("#disasters").children();
+		for(let i = 0; i < dcards.length; i++) {
+	     		if($(dcards[i]).data('id') == idx) {
+				viewCalls(JSON.parse($(dcards[i]).data('calls')));
+	     		}
+	     	}
+	};
+	primaryDiv.setAttribute("tabindex", "0");
+	cardDiv.appendChild(primaryDiv);
+
+	let demoPrimary = document.createElement("div");
+	demoPrimary.setAttribute("style", "padding-left: 20px; padding-right: 20px;");
+	primaryDiv.appendChild(demoPrimary);
+	let type = document.createElement("h2");
+	type.setAttribute("class", "demo-card__title mdc-typography mdc-typography--headline6");
+	type.innerText = name;
+	demoPrimary.appendChild(type);
+	let when = document.createElement("div");
+	let curTime = +(new Date());
+	let diff = curTime - lastseen;
+	let minutes = Math.round(diff/1000/60);
+	when.innerText = "Last seen " + minutes + " minute" + (minutes == 1 ? "" : "s") + " ago.";
+	when.setAttribute("class", "demo-card__subtitle mdc-typography mdc-typography--subtitle2");
+	demoPrimary.appendChild(when);
+
+	let actionsDiv = document.createElement("div");
+	actionsDiv.setAttribute("class", "mdc-card__actions");
+	cardDiv.appendChild(actionsDiv);
+
+	let actionButtons = document.createElement("div");
+	actionButtons.setAttribute("class", "mdc-card__action-buttons");
+	actionButtons.innerHTML = '<button class="mdc-button mdc-card__action mdc-card__action--button abtn">Details</button><button class="mdc-button mdc-card__action mdc-card__action--button" onclick="removeDisaster(\'' + id + '\');">Remove</button>';
+	actionsDiv.appendChild(actionButtons);
+	actionButtons.getElementsByClassName("abtn")[0].onclick = function() {
+		currentDisasterId = idx;
+		let dcards = $("#disasters").children();
+		for(let i = 0; i < dcards.length; i++) {
+	     		if($(dcards[i]).data('id') == idx) {
+				viewCalls(JSON.parse($(dcards[i]).data('calls')));
+	     		}
+	     	}
+	};
+
+	let actionIcons = document.createElement("div");
+	actionIcons.setAttribute("class", "mdc-card__action-icons");
+	actionsDiv.appendChild(actionIcons);
+	let exploreButton = document.createElement("button");
+	exploreButton.setAttribute("class", "mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded");
+	exploreButton.setAttribute("title", "View on map");
+	exploreButton.setAttribute("data-mdc-ripple-is-unbounded", "true");
+	exploreButton.innerText = "explore";
+	exploreButton.onclick = function() {
+		for(let i = 0; i < disasters.length; i++) {
+			if(disasters[i]["id"] == idx) {
+				map.setView({center: new Microsoft.Maps.Location(disasters[i]["lat"], disasters[i]["long"])})
+				break;
+			}
+		}
+	};
+	let shareButton = document.createElement("button");
+	shareButton.setAttribute("class", "mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded");
+	shareButton.setAttribute("title", "Share");
+	shareButton.setAttribute("data-mdc-ripple-is-unbounded", "true");
+	shareButton.innerText = "share";
+	shareButton.onclick = function() {
+		if(disasters[i]["id"] == idx) {
+			window.open('https://twitter.com/intent/tweet?text=Check%20out%20this%20cool%20disaster%20I%20found%20at%20' + disasters[i]["lat"] + '%C2%B0%20N%2C%20' + disasters[i]["long"] + '%C2%B0%20W%21%20%F0%9F%94%A5%F0%9F%92%80%F0%9F%A4%A2%E2%99%BF%F0%9F%98%82');
+			break;
+		}
+	};
+	actionIcons.appendChild(exploreButton);
+	actionIcons.appendChild(shareButton);
+
+	return cardDiv;
+}
+function constructVoicemail(text, idx, audioURL, audioType, lat, long) {
+	/*
+	<div class="mdc-card" style="margin-top: 1.5px;">
+		<div class="mdc-card__primary-action demo-card__primary-action" tabindex="0">
+			<div class="demo-card__primary" style="padding-left: 20px; padding-right: 20px;">
+				<h2 class="demo-card__title mdc-typography mdc-typography--headline6">Voicemail</h2>
+				<h3 class="demo-card__subtitle mdc-typography mdc-typography--subtitle2">Oh no! There is an event horizon forming on 21st street. It is blocking my commute to work at the train station. On the bright side, it is bending light in such a way that I can see into my neighbor's garage. That bastard stole my lawnmower.</h3>
+			</div>
+		</div>
+		<div class="mdc-card__actions">
+			<audio controls style="width: 100%;">
+				Your browser does not support the audio tag.
+			</audio>
+		</div>
+	</div>*/
+	/*
+		<button class="mdc-button" style="border-radius: 100px;" class="playbutton">
+			<i class="material-icons">
+				play_arrow
+			</i>
+		</button>
+		<div class="mdc-slider" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="49.81527093596059" aria-label="Select Value" style="margin-left: 10px; margin-right: 20px; width: 100%;position: relative; top:-1px;">
+			<div class="mdc-slider__track-container">
+				<div class="mdc-slider__track" style="transform: scaleX(0.498153);"></div>
+			</div>
+			<div class="mdc-slider__thumb-container" style="transform: translateX(404.5px) translateX(-50%);">
+				<svg class="mdc-slider__thumb" width="21" height="21">
+					<circle cx="10.5" cy="10.5" r="7.875"></circle>
+				</svg>
+				<div class="mdc-slider__focus-ring"></div>
+			</div>
+		</div>
+		<span style="margin-right: 10px;" class="duration">0:51</span>
+	*/
+	let cardDiv = document.createElement("div");
+	cardDiv.setAttribute("class", "mdc-card");
+	$(cardDiv).data("id", idx);
+	$(cardDiv).css('margin-bottom', '1.5px');
+	let primaryDiv = document.createElement("div");
+	primaryDiv.setAttribute("class", "mdc-card__primary-action demo-card__primary-action");
+	primaryDiv.setAttribute("tabindex", "0");
+	$(primaryDiv).css('padding-left', '20px');
+	$(primaryDiv).css('padding-right', '20px');
+	let voicemail = document.createElement("h2");
+	$(voicemail).css('margin-bottom', '0');
+	voicemail.setAttribute("class", "demo-card__title mdc-typography mdc-typography--headline6");
+	voicemail.innerText = "Voicemail";
+	let dellink = document.createElement("a");
+	let id = generateID();
+	dellink.setAttribute("id", id);
+	$(dellink).css('float', 'right');
+	$(dellink).css('position', 'relative');
+	$(dellink).css('top', '3px');
+	$(dellink).css('color', 'rgb(80, 80, 80)');
+	dellink.setAttribute("href", "javascript:void(0);");
+	dellink.onclick = function(e) {
+		deleteCall(id);
+		e.preventDefault();
+		return false;
+	};
+	dellink.innerHTML = "<i class=\"material-icons\">delete_outline</i>";
+	voicemail.appendChild(dellink);
+	let viewlink = document.createElement("a");
+	$(viewlink).css('float', 'right');
+	$(viewlink).css('position', 'relative');
+	$(viewlink).css('top', '3px');
+	$(viewlink).css('left', '-8px');
+	$(viewlink).css('color', 'rgb(80, 80, 80)');
+	viewlink.setAttribute("href", "javascript:viewCall('" + id + "', " + lat + ", " + long + ")");
+	viewlink.innerHTML = "<i class=\"material-icons\">explore</i>";
+	primaryDiv.onclick = function(e) {
+		if(e.srcElement.tagName != "I") {
+			viewCall(id, lat, long);
+		}
+	};
+	voicemail.appendChild(viewlink);
+	primaryDiv.appendChild(voicemail);
+	let textel = document.createElement("h3");
+	textel.setAttribute("class", "demo-card__subtitle mdc-typography mdc-typography--subtitle2");
+	textel.innerText = text;
+	primaryDiv.appendChild(textel);
+	cardDiv.appendChild(primaryDiv);
+	let actionDiv = document.createElement("div");
+	actionDiv.setAttribute("class", "mdc-card__actions");
+	cardDiv.appendChild(actionDiv);
+
+	let audio = document.createElement("audio");
+	let source = document.createElement("source");
+	source.setAttribute("src", audioURL);
+	source.setAttribute("type", audioType);
+	audio.appendChild(source);
+
+	let playButton = document.createElement("button");
+	playButton.setAttribute("class", "mdc-button playbutton");
+	$(playButton).css('border-radius', '100px');
+	let icon = document.createElement("i");
+	icon.innerHTML = "play_arrow";
+	icon.setAttribute("class", "material-icons");
+	playButton.appendChild(icon);
+	let slider = document.createElement("div");
+	slider.setAttribute("class", "mdc-slider");
+	slider.setAttribute("tabindex", "0");
+	slider.setAttribute("role", "slider");
+	slider.setAttribute("aria-valuemin", "0");
+	slider.setAttribute("aria-valuemax", "100");
+	slider.setAttribute("aria-valuenow", "0");
+	slider.setAttribute("aria-label", "position");
+	$(slider).css('margin-left', '10px');
+	$(slider).css('margin-right', '20px');
+	$(slider).css('width', '100%');
+	$(slider).css('position', 'relative');
+	$(slider).css('top', '-1px');
+	let trackContainer = document.createElement("div");
+	trackContainer.setAttribute("class", "mdc-slider__track-container");
+	slider.appendChild(trackContainer);
+	let track = document.createElement("div");
+	track.setAttribute("class", "mdc-slider__track");
+	trackContainer.appendChild(track);
+	let thumbContainer = document.createElement("div");
+	thumbContainer.setAttribute("class", "mdc-slider__thumb-container");
+	thumbContainer.innerHTML = '<svg class="mdc-slider__thumb" width="21" height="21"><circle cx="10.5" cy="10.5" r="7.875"></circle></svg><div class="mdc-slider__focus-ring"></div>';
+	slider.appendChild(thumbContainer);
+	let duration = document.createElement("span");
+	duration.innerText = "0:51";
+	duration.setAttribute("class", "duration");
+	$(duration).css('margin-right', '15px');
+	$(duration).css('margin-left', '4px');
+	actionDiv.appendChild(playButton);
+	actionDiv.appendChild(slider);
+	actionDiv.appendChild(duration);
+	actionDiv.appendChild(audio);
+
+	return cardDiv;
+}
+function viewCall(id, lat, long) {
+	let el = document.getElementById(id);
+	let card = el.parentElement.parentElement.parentElement;
+	map.setView({center: new Microsoft.Maps.Location(lat, long)})
+}
+function deleteCall(id) {
+	let el = document.getElementById(id);
+	let card = el.parentElement.parentElement.parentElement;
+	$(card).animate({
+		'height': '0',
+		'opacity': '0',
+	}, function() {
+		$(card).remove();
+	});
+	let index = 0;
+	let calls = $("#calls").children();
+	for(let i = 0; i < calls.length; i++) {
+		if($(calls[i]).data('id') == id) {
+			index = i;
+			break;
+		}
+	}
+	let dcards = $("#disasters").children();
+	for(let i = 0; i < dcards.length; i++) {
+		if($(dcards[i]).data('id') == currentDisasterId) {
+			$(dcards[i]).data('calls', JSON.stringify(JSON.parse($(dcards[i]).data('calls')).splice(index, 1)));
+		}
+	}
+}
+function removeDisaster(id) {
+	$("#" + id).animate({
+		'height': '0',
+		'opacity': '0',
+	}, function() {
+		$("#" + id).remove();
+	});
+}
+let disasters = [
+	{
+		"name": "Fire",
+		"id": 0,
+		"when": +(new Date())-1000*60*2,
+		"lat": 0,
+		"long": 0,
+		"calls": [
+			{"text": "Fire Help! My dog has started to eat my other dog. This angered the second dog, who tried to eat the original one. Now both of my dogs have eaten the other, and I'm worried that the total matter in the universe has decreased.", "file": "https://api.twilio.com/2010-04-01/Accounts/ACdefb5cf78a4117f4acb67125ca72c36f/Recordings/RE54dd534feb504d4398335209c3249d9d", "type": "audio/wav", "latitude": 30, "longitude": 20, "id": 0},
+			{"text": "Oh no! There is an event horizon forming on 21st street. It is blocking my commute to work at the train station. On the bright side, it is bending light in such a way that I can see into my neighbor's garage. That bastard stole my lawnmower.", "file": "", "type": "", "latitude": 30, "longitude": 20, "id": 1},
+		],
+	},
+	{
+		"name": "Theft",
+		"when": +(new Date())-1000*60*3,
+		"id": 1,
+		"lat": 10,
+		"long": 0,
+		"calls": [
+			{"text": "Theft Help! My dog has started to eat my other dog. This angered the second dog, who tried to eat the original one. Now both of my dogs have eaten the other, and I'm worried that the total matter in the universe has decreased.", "file": "https://api.twilio.com/2010-04-01/Accounts/ACdefb5cf78a4117f4acb67125ca72c36f/Recordings/RE54dd534feb504d4398335209c3249d9d", "type": "audio/wav", "latitude": 30, "longitude": 20, "id": 2},
+			{"text": "Oh no! There is an event horizon forming on 21st street. It is blocking my commute to work at the train station. On the bright side, it is bending light in such a way that I can see into my neighbor's garage. That bastard stole my lawnmower.", "file": "", "type": "", "latitude": 30, "longitude": 20, "id": 3},
+		],
+	}
+];
+$(document).ready(function() {
+	$(window).resize(function() {
+		updateSizes();
+		setTimeout(function() {
+			updateSizes();
+		}, 150);
+	});
+	updateSizes();
+	setTimeout(function() {
+		updateSizes();
+	}, 150);
+	$("#disasters").html("");
+	for(let i = 0; i < disasters.length; i++) {
+		let disaster = constructDisaster(disasters[i]["name"], disasters[i]["id"], disasters[i]["when"], disasters[i]["lat"], disasters[i]["long"], disasters[i]["calls"]);
+		$("#disasters")[0].appendChild(disaster);
+	}
+});
+</script>
+<script type='text/javascript' src='http://www.bing.com/api/maps/mapcontrol?callback=getMap' async defer></script>
+<!-- end styles and scripts -->
+</head>
+<body>
+	<div id="sidebar" style="overflow-x: hidden; position: absolute; display: block; top: 0; left: 0; box-shadow: 0 0 40px rgba(0, 0, 0, 0.4); z-index: 1000;">
+		<div id="navbar" style="padding: 20px; padding-bottom: 10px;">
+			<button class="mdc-button" style="border-radius: 100px; opacity: 0; position: relative; left: 0;" id="backarrow" onclick="goBack();">
+				<i class="material-icons">
+					arrow_back
+				</i>
+			</button>
+			<span style="position: relative;">
+				<span id="header_new" style="opacity: 0; font-family: 'roboto'; font-size: 18px; padding-left: 10px; position: absolute; top: 0px; left: -70px;">Disasters</span>
+				<span id="header_current" style="font-family: 'roboto'; font-size: 18px; padding-left: 10px; position: absolute; top: 0px; left: -70px;">Disasters</span>
+			</span>
+		</div>
+		<div style="width: 100%;">
+			<div id="disasters" style="position: absolute; width: 100%;">
+
+				<div class="mdc-card mdc-card-outlined demo-card demo-ui-control" style="margin: 10px; box-shadow: 0px 2px 1px -1px rgba(0, 0, 0, 0.2), 0px 2px 5px 0px rgba(0, 0, 0, 0.14), 0px 1px 3px 0px rgba(0,0,0,.12)">
+					<div class="mdc-card__primary-action demo-card__primary-action" onclick="viewCalls();" tabindex="0">
+						<div class="demo-card__primary" style="padding-left: 20px; padding-right: 20px;">
+							<h2 class="demo-card__title mdc-typography mdc-typography--headline6">Fire</h2>
+							<h3 class="demo-card__subtitle mdc-typography mdc-typography--subtitle2">Last reported 3 minutes ago</h3>
+						</div>
+					</div>
+					<div class="mdc-card__actions">
+						<div class="mdc-card__action-buttons">
+							<button class="mdc-button mdc-card__action mdc-card__action--button" onclick="viewCalls();">Details</button>
+							<button class="mdc-button mdc-card__action mdc-card__action--button">Remove</button>
+						</div>
+						<div class="mdc-card__action-icons">
+							<button class="mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded" title="View on map" data-mdc-ripple-is-unbounded="true">explore</button>
+							<button class="mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded" title="Share" data-mdc-ripple-is-unbounded="true" onclick="window.open('https://twitter.com/intent/tweet?text=Check%20out%20this%20cool%20disaster%20I%20found%20at%2042.3601%C2%B0%20N%2C%2071.0589%C2%B0%20W%21%20%F0%9F%94%A5%F0%9F%92%80%F0%9F%A4%A2%E2%99%BF%F0%9F%98%82');">share</button>
+						</div>
+					</div>
+				</div>
+				<div class="mdc-card mdc-card-outlined demo-card demo-ui-control" style="margin: 10px; box-shadow: 0px 2px 1px -1px rgba(0, 0, 0, 0.2), 0px 2px 5px 0px rgba(0, 0, 0, 0.14), 0px 1px 3px 0px rgba(0,0,0,.12)">
+					<div class="mdc-card__primary-action demo-card__primary-action" onclick="viewCalls();" tabindex="0">
+						<div class="demo-card__primary" style="padding-left: 20px; padding-right: 20px;">
+							<h2 class="demo-card__title mdc-typography mdc-typography--headline6">Theft</h2>
+							<h3 class="demo-card__subtitle mdc-typography mdc-typography--subtitle2">Last reported 4 minutes ago</h3>
+						</div>
+					</div>
+					<div class="mdc-card__actions">
+						<div class="mdc-card__action-buttons">
+							<button class="mdc-button mdc-card__action mdc-card__action--button" onclick="viewCalls();">Details</button>
+							<button class="mdc-button mdc-card__action mdc-card__action--button">Remove</button>
+						</div>
+						<div class="mdc-card__action-icons">
+							<button class="mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded" title="View on map" data-mdc-ripple-is-unbounded="true">explore</button>
+							<button class="mdc-icon-button material-icons mdc-card__action mdc-card__action--icon--unbounded" title="Share" data-mdc-ripple-is-unbounded="true" onclick="window.open('https://twitter.com/intent/tweet?text=Check%20out%20this%20cool%20disaster%20I%20found%20at%2042.3601%C2%B0%20N%2C%2071.0589%C2%B0%20W%21%20%F0%9F%94%A5%F0%9F%92%80%F0%9F%A4%A2%E2%99%BF%F0%9F%98%82');">share</button>
+						</div>
+					</div>
+				</div>
+
+			</div>
+			<div id="calls" style="display: none; position: absolute; width: 100%; box-shadow: none;">
+				<!--<span style="font-weight: 500; font-size: 20px;">Fire</p>
+				<hr />
+				<div class="mdc-card">
+					<div class="mdc-card__primary-action demo-card__primary-action" tabindex="0">
+						<div class="demo-card__primary" style="padding-left: 20px; padding-right: 20px;">
+							<h2 class="demo-card__title mdc-typography mdc-typography--headline6">Voicemail</h2>
+							<h3 class="demo-card__subtitle mdc-typography mdc-typography--subtitle2">Help! My dog has started to eat my other dog. This angered the second dog, who tried to eat the original one. Now both of my dogs have eaten the other, and I'm worried that the total matter in the universe has decreased.</h3>
+						</div>
+					</div>
+					<div class="mdc-card__actions">
+						<button class="mdc-button" style="border-radius: 100px;">
+							<i class="material-icons">
+								play_arrow
+							</i>
+						</button>
+						<div class="mdc-slider" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="49.81527093596059" aria-label="Select Value" style="margin-left: 10px; margin-right: 20px; width: 100%;position: relative; top:-1px;"><div class="mdc-slider__track-container"><div class="mdc-slider__track" style="transform: scaleX(0.498153);"></div></div><div class="mdc-slider__thumb-container" style="transform: translateX(404.5px) translateX(-50%);"><svg class="mdc-slider__thumb" width="21" height="21"><circle cx="10.5" cy="10.5" r="7.875"></circle></svg><div class="mdc-slider__focus-ring"></div></div></div>
+						<span style="margin-right: 10px;">0:51</span>
+					</div>
+				</div>
+				<div class="mdc-card" style="margin-top: 1.5px;">
+					<div class="mdc-card__primary-action demo-card__primary-action" tabindex="0">
+						<div class="demo-card__primary" style="padding-left: 20px; padding-right: 20px;">
+							<h2 class="demo-card__title mdc-typography mdc-typography--headline6">Voicemail</h2>
+							<h3 class="demo-card__subtitle mdc-typography mdc-typography--subtitle2">Oh no! There is an event horizon forming on 21st street. It is blocking my commute to work at the train station. On the bright side, it is bending light in such a way that I can see into my neighbor's garage. That bastard stole my lawnmower.</h3>
+						</div>
+					</div>
+					<div class="mdc-card__actions">
+						<audio controls style="width: 100%;">
+							Your browser does not support the audio tag.
+						</audio>
+					</div>
+				</div>
+				-->
+			</div>
+		</div>
+
+	</div>
+	<div id="myMap" style="position: absolute; display: inline-block; top: 0; left: 400px; width:600px;height:400px;"></div>
+</body>
+</html>
