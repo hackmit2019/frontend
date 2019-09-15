@@ -27,6 +27,13 @@ html, body {
 function fetchNew() {
 	$.get("/disasters", function(data) {
 		updateData(data);
+		let cal = [];
+		for(let i = 0; i < data.length; i++) {
+			for(let j = 0; j < data[i]["calls"].length; j++) {
+				cal.push(data[i]["calls"][j]);
+			}
+		}
+		updateHeatmap(cal);
 		disasters = data;
 		setTimeout(function() {
 			fetchNew();
