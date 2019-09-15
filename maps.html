@@ -25,7 +25,7 @@ html, body {
 <script type='text/javascript'>
 function fetchNew() {
 	$.get("/disasters", function(data) {
-		let nd = JSON.parse();
+		let nd = JSON.parse(data);
 		updateData(nd);
 		disasters = nd;
 		setTimeout(function() {
