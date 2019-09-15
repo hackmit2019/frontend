@@ -23,6 +23,16 @@ html, body {
 <link rel="stylesheet" href="icon.css">
 <script src="jquery.min.js"></script>
 <script type='text/javascript'>
+function fetchNew() {
+	$.get("/disasters", function(data) {
+		let nd = JSON.parse();
+		updateData(nd);
+		disasters = nd;
+		setTimeout(function() {
+			fetchNew();
+		}, 8000);
+	});
+};
 let map;
 let heatmap;
 let currentDisasterId = -1;
@@ -622,7 +632,7 @@ function removeDisaster(id) {
 		$("#" + id).remove();
 	});
 }
-let disasters = [
+let disasters = [/*
 	{
 		"name": "Fire",
 		"id": 0,
@@ -644,7 +654,7 @@ let disasters = [
 			{"text": "Theft Help! My dog has started to eat my other dog. This angered the second dog, who tried to eat the original one. Now both of my dogs have eaten the other, and I'm worried that the total matter in the universe has decreased.", "file": "https://api.twilio.com/2010-04-01/Accounts/ACdefb5cf78a4117f4acb67125ca72c36f/Recordings/RE54dd534feb504d4398335209c3249d9d", "type": "audio/wav", "latitude": 30, "longitude": 20, "id": 2},
 			{"text": "Oh no! There is an event horizon forming on 21st street. It is blocking my commute to work at the train station. On the bright side, it is bending light in such a way that I can see into my neighbor's garage. That bastard stole my lawnmower.", "file": "", "type": "", "latitude": 30, "longitude": 20, "id": 3},
 		],
-	}
+	}*/
 ];
 $(document).ready(function() {
 	$(window).resize(function() {
@@ -662,6 +672,7 @@ $(document).ready(function() {
 		let disaster = constructDisaster(disasters[i]["name"], disasters[i]["id"], disasters[i]["when"], disasters[i]["lat"], disasters[i]["long"], disasters[i]["calls"]);
 		$("#disasters")[0].appendChild(disaster);
 	}
+	fetchNew();
 });
 </script>
 <script type='text/javascript' src='http://www.bing.com/api/maps/mapcontrol?callback=getMap' async defer></script>
